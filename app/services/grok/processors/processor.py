@@ -23,6 +23,24 @@ def _is_http2_stream_error(e: Exception) -> bool:
     return "http/2" in err_str or "curl: (92)" in err_str or "stream" in err_str
 
 
+def _normalize_stream_line(line: Any) -> Optional[str]:
+    """规范化流式响应行，兼容 SSE data 前缀与空行"""
+    if line is None:
+        return None
+    if isinstance(line, (bytes, bytearray)):
+        text = line.decode("utf-8", errors="ignore")
+    else:
+        text = str(line)
+    text = text.strip()
+    if not text:
+        return None
+    if text.startswith("data:"):
+        text = text[5:].strip()
+    if text == "[DONE]":
+        return None
+    return text
+
+
 T = TypeVar("T")
 
 
@@ -233,6 +251,7 @@ class StreamProcessor(BaseProcessor):
 
         try:
             async for line in _with_idle_timeout(response, idle_timeout, self.model):
+                line = _normalize_stream_line(line)
                 if not line:
                     continue
                 try:
@@ -387,6 +406,7 @@ class CollectProcessor(BaseProcessor):
 
         try:
             async for line in _with_idle_timeout(response, idle_timeout, self.model):
+                line = _normalize_stream_line(line)
                 if not line:
                     continue
                 try:
@@ -525,6 +545,7 @@ class VideoStreamProcessor(BaseProcessor):
 
         try:
             async for line in _with_idle_timeout(response, idle_timeout, self.model):
+                line = _normalize_stream_line(line)
                 if not line:
                     continue
                 try:
@@ -646,6 +667,7 @@ class VideoCollectProcessor(BaseProcessor):
 
         try:
             async for line in _with_idle_timeout(response, idle_timeout, self.model):
+                line = _normalize_stream_line(line)
                 if not line:
                     continue
                 try:
@@ -726,11 +748,20 @@ class VideoCollectProcessor(BaseProcessor):
 class ImageStreamProcessor(BaseProcessor):
     """图片生成流式响应处理器"""
 
-    def __init__(self, model: str, token: str = "", n: int = 1):
+    def __init__(
+        self, model: str, token: str = "", n: int = 1, response_format: str = "b64_json"
+    ):
         super().__init__(model, token)
         self.partial_index = 0
         self.n = n
         self.target_index = random.randint(0, 1) if n == 1 else None
+        self.response_format = response_format
+        if response_format == "url":
+            self.response_field = "url"
+        elif response_format == "base64":
+            self.response_field = "base64"
+        else:
+            self.response_field = "b64_json"
 
     def _sse(self, event: str, data: dict) -> str:
         """构建 SSE 响应 (覆盖基类)"""
@@ -746,6 +777,7 @@ class ImageStreamProcessor(BaseProcessor):
 
         try:
             async for line in _with_idle_timeout(response, idle_timeout, self.model):
+                line = _normalize_stream_line(line)
                 if not line:
                     continue
                 try:
@@ -769,7 +801,7 @@ class ImageStreamProcessor(BaseProcessor):
                         "image_generation.partial_image",
                         {
                             "type": "image_generation.partial_image",
-                            "b64_json": "",
+                            self.response_field: "",
                             "index": out_index,
                             "progress": progress,
                         },
@@ -780,6 +812,11 @@ class ImageStreamProcessor(BaseProcessor):
                 if mr := resp.get("modelResponse"):
                     if urls := mr.get("generatedImageUrls"):
                         for url in urls:
+                            if self.response_format == "url":
+                                processed = await self.process_url(url, "image")
+                                if processed:
+                                    final_images.append(processed)
+                                continue
                             dl_service = self._get_dl()
                             base64_data = await dl_service.to_base64(
                                 url, self.token, "image"
@@ -804,7 +841,7 @@ class ImageStreamProcessor(BaseProcessor):
                     "image_generation.completed",
                     {
                         "type": "image_generation.completed",
-                        "b64_json": b64,
+                        self.response_field: b64,
                         "index": out_index,
                         "usage": {
                             "total_tokens": 50,
@@ -856,8 +893,11 @@ class ImageStreamProcessor(BaseProcessor):
 class ImageCollectProcessor(BaseProcessor):
     """图片生成非流式响应处理器"""
 
-    def __init__(self, model: str, token: str = ""):
+    def __init__(
+        self, model: str, token: str = "", response_format: str = "b64_json"
+    ):
         super().__init__(model, token)
+        self.response_format = response_format
 
     async def process(self, response: AsyncIterable[bytes]) -> List[str]:
         """处理并收集图片"""
@@ -867,6 +907,7 @@ class ImageCollectProcessor(BaseProcessor):
 
         try:
             async for line in _with_idle_timeout(response, idle_timeout, self.model):
+                line = _normalize_stream_line(line)
                 if not line:
                     continue
                 try:
@@ -879,6 +920,11 @@ class ImageCollectProcessor(BaseProcessor):
                 if mr := resp.get("modelResponse"):
                     if urls := mr.get("generatedImageUrls"):
                         for url in urls:
+                            if self.response_format == "url":
+                                processed = await self.process_url(url, "image")
+                                if processed:
+                                    images.append(processed)
+                                continue
                             dl_service = self._get_dl()
                             base64_data = await dl_service.to_base64(
                                 url, self.token, "image"
