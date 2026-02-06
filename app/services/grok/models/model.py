@@ -138,6 +138,16 @@ class ModelService:
             description="Video generation model",
             is_video=True,
         ),
+        # Portrait 纵向视频模型
+        ModelInfo(
+            model_id="grok-imagine-1.0-video-portrait-6s",
+            grok_model="grok-3",
+            model_mode="MODEL_MODE_FAST",
+            cost=Cost.HIGH,
+            display_name="Grok Video Portrait 6s",
+            description="Video generation model (9:16, 6s, 720p)",
+            is_video=True,
+        ),
         ModelInfo(
             model_id="grok-imagine-1.0-video-portrait-10s",
             grok_model="grok-3",
@@ -145,6 +155,15 @@ class ModelService:
             cost=Cost.HIGH,
             display_name="Grok Video Portrait 10s",
             description="Video generation model (9:16, 10s, 720p)",
+            is_video=True,
+        ),
+        ModelInfo(
+            model_id="grok-imagine-1.0-video-portrait-12s",
+            grok_model="grok-3",
+            model_mode="MODEL_MODE_FAST",
+            cost=Cost.HIGH,
+            display_name="Grok Video Portrait 12s",
+            description="Video generation model (9:16, 12s, 720p)",
             is_video=True,
         ),
         ModelInfo(
@@ -156,6 +175,16 @@ class ModelService:
             description="Video generation model (9:16, 15s, 720p)",
             is_video=True,
         ),
+        # Landscape 横向视频模型
+        ModelInfo(
+            model_id="grok-imagine-1.0-video-landscape-6s",
+            grok_model="grok-3",
+            model_mode="MODEL_MODE_FAST",
+            cost=Cost.HIGH,
+            display_name="Grok Video Landscape 6s",
+            description="Video generation model (16:9, 6s, 720p)",
+            is_video=True,
+        ),
         ModelInfo(
             model_id="grok-imagine-1.0-video-landscape-10s",
             grok_model="grok-3",
@@ -163,6 +192,15 @@ class ModelService:
             cost=Cost.HIGH,
             display_name="Grok Video Landscape 10s",
             description="Video generation model (16:9, 10s, 720p)",
+            is_video=True,
+        ),
+        ModelInfo(
+            model_id="grok-imagine-1.0-video-landscape-12s",
+            grok_model="grok-3",
+            model_mode="MODEL_MODE_FAST",
+            cost=Cost.HIGH,
+            display_name="Grok Video Landscape 12s",
+            description="Video generation model (16:9, 12s, 720p)",
             is_video=True,
         ),
         ModelInfo(
@@ -230,9 +268,11 @@ class ModelService:
             Tuple[aspect_ratio, video_length, resolution_name]
 
         Examples:
+            grok-imagine-1.0-video-portrait-6s -> ("9:16", 6, "720p")
             grok-imagine-1.0-video-portrait-10s -> ("9:16", 10, "720p")
+            grok-imagine-1.0-video-landscape-12s -> ("16:9", 12, "720p")
             grok-imagine-1.0-video-landscape-15s -> ("16:9", 15, "720p")
-            grok-imagine-1.0-video -> ("3:2", 6, "480p")  # 默认值
+            grok-imagine-1.0-video -> ("3:2", 6, "720p")  # 默认值
         """
         # 默认参数
         aspect_ratio = "3:2"
@@ -245,8 +285,12 @@ class ModelService:
         elif "landscape" in model_id:
             aspect_ratio = "16:9"
 
-        if "10s" in model_id:
+        if "6s" in model_id:
+            video_length = 6
+        elif "10s" in model_id:
             video_length = 10
+        elif "12s" in model_id:
+            video_length = 12
         elif "15s" in model_id:
             video_length = 15
 

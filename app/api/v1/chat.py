@@ -68,9 +68,9 @@ class VideoConfig(BaseModel):
     @classmethod
     def validate_video_length(cls, v):
         if v is not None:
-            if v not in (6, 10, 15):
+            if v not in (6, 10, 12, 15):
                 raise ValidationException(
-                    message="video_length must be 6, 10, or 15 seconds",
+                    message="video_length must be 6, 10, 12, or 15 seconds",
                     param="video_config.video_length",
                     code="invalid_video_length",
                 )
