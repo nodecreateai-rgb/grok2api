@@ -138,6 +138,42 @@ class ModelService:
             description="Video generation model",
             is_video=True,
         ),
+        ModelInfo(
+            model_id="grok-imagine-1.0-video-portrait-10s",
+            grok_model="grok-3",
+            model_mode="MODEL_MODE_FAST",
+            cost=Cost.HIGH,
+            display_name="Grok Video Portrait 10s",
+            description="Video generation model (9:16, 10s, 720p)",
+            is_video=True,
+        ),
+        ModelInfo(
+            model_id="grok-imagine-1.0-video-portrait-15s",
+            grok_model="grok-3",
+            model_mode="MODEL_MODE_FAST",
+            cost=Cost.HIGH,
+            display_name="Grok Video Portrait 15s",
+            description="Video generation model (9:16, 15s, 720p)",
+            is_video=True,
+        ),
+        ModelInfo(
+            model_id="grok-imagine-1.0-video-landscape-10s",
+            grok_model="grok-3",
+            model_mode="MODEL_MODE_FAST",
+            cost=Cost.HIGH,
+            display_name="Grok Video Landscape 10s",
+            description="Video generation model (16:9, 10s, 720p)",
+            is_video=True,
+        ),
+        ModelInfo(
+            model_id="grok-imagine-1.0-video-landscape-15s",
+            grok_model="grok-3",
+            model_mode="MODEL_MODE_FAST",
+            cost=Cost.HIGH,
+            display_name="Grok Video Landscape 15s",
+            description="Video generation model (16:9, 15s, 720p)",
+            is_video=True,
+        ),
     ]
 
     _map = {m.model_id: m for m in MODELS}
@@ -181,6 +217,40 @@ class ModelService:
             return ["ssoSuper"]
         # 基础模型优先使用 basic 池，缺失时可回退到 super 池
         return ["ssoBasic", "ssoSuper"]
+
+    @classmethod
+    def parse_video_params(cls, model_id: str) -> Tuple[str, int, str]:
+        """
+        从模型名称解析视频参数
+
+        Args:
+            model_id: 模型 ID
+
+        Returns:
+            Tuple[aspect_ratio, video_length, resolution_name]
+
+        Examples:
+            grok-imagine-1.0-video-portrait-10s -> ("9:16", 10, "720p")
+            grok-imagine-1.0-video-landscape-15s -> ("16:9", 15, "720p")
+            grok-imagine-1.0-video -> ("3:2", 6, "480p")  # 默认值
+        """
+        # 默认参数
+        aspect_ratio = "3:2"
+        video_length = 6
+        resolution_name = "720p"
+
+        # 解析模型名称
+        if "portrait" in model_id:
+            aspect_ratio = "9:16"
+        elif "landscape" in model_id:
+            aspect_ratio = "16:9"
+
+        if "10s" in model_id:
+            video_length = 10
+        elif "15s" in model_id:
+            video_length = 15
+
+        return aspect_ratio, video_length, resolution_name
 
 
 __all__ = ["ModelService"]

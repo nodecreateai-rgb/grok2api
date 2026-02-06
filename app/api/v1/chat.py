@@ -68,9 +68,9 @@ class VideoConfig(BaseModel):
     @classmethod
     def validate_video_length(cls, v):
         if v is not None:
-            if v not in (6, 10):
+            if v not in (6, 10, 15):
                 raise ValidationException(
-                    message="video_length must be 6 or 10 seconds",
+                    message="video_length must be 6, 10, or 15 seconds",
                     param="video_config.video_length",
                     code="invalid_video_length",
                 )
@@ -262,18 +262,30 @@ async def chat_completions(request: ChatCompletionRequest):
     if model_info and model_info.is_video:
         from app.services.grok.services.media import VideoService
 
-        # 提取视频配置 (默认值在 Pydantic 模型中处理)
-        v_conf = request.video_config or VideoConfig()
+        # 优先从模型名称解析参数
+        aspect_ratio, video_length, resolution_name = ModelService.parse_video_params(
+            request.model
+        )
+
+        # 如果提供了 video_config，则覆盖解析的参数
+        if request.video_config:
+            v_conf = request.video_config
+            aspect_ratio = v_conf.aspect_ratio or aspect_ratio
+            video_length = v_conf.video_length or video_length
+            resolution_name = v_conf.resolution_name or resolution_name
+            preset = v_conf.preset or "normal"
+        else:
+            preset = "normal"
 
         result = await VideoService.completions(
             model=request.model,
             messages=[msg.model_dump() for msg in request.messages],
             stream=request.stream,
             thinking=request.thinking,
-            aspect_ratio=v_conf.aspect_ratio,
-            video_length=v_conf.video_length,
-            resolution=v_conf.resolution_name,
-            preset=v_conf.preset,
+            aspect_ratio=aspect_ratio,
+            video_length=video_length,
+            resolution=resolution_name,
+            preset=preset,
         )
     else:
         result = await ChatService.completions(
