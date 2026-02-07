@@ -26,7 +26,8 @@ from app.services.token import get_token_manager, EffortType
 
 CHAT_API = "https://grok.com/rest/app-chat/conversations/new"
 TIMEOUT = 120
-BROWSER = "chrome136"
+DEFAULT_BROWSER = "chrome136"
+DEFAULT_USER_AGENT = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36"
 
 
 @dataclass
@@ -162,6 +163,7 @@ class ChatRequestBuilder:
     @staticmethod
     def build_headers(token: str) -> Dict[str, str]:
         """构造请求头"""
+        user_agent = get_config("grok.user_agent", DEFAULT_USER_AGENT)
         headers = {
             "Accept": "*/*",
             "Accept-Encoding": "gzip, deflate, br, zstd",
@@ -182,7 +184,7 @@ class ChatRequestBuilder:
             "Sec-Fetch-Dest": "empty",
             "Sec-Fetch-Mode": "cors",
             "Sec-Fetch-Site": "same-origin",
-            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36",
+            "User-Agent": user_agent,
         }
 
         apply_statsig(headers)
@@ -216,7 +218,7 @@ class ChatRequestBuilder:
         if image_attachments:
             merged_attachments.extend(image_attachments)
 
-        payload = {
+        payload: Dict[str, Any] = {
             "temporary": temporary,
             "modelName": model,
             "message": message,
@@ -238,7 +240,7 @@ class ChatRequestBuilder:
                 "modelConfigOverride": {"modelMap": {}},
                 "requestModelDetails": {"modelId": model},
             },
-            "disableMemory": False,
+            "disableMemory": get_config("grok.disable_memory", True),
             "forceSideBySide": False,
             "isAsyncChat": False,
             "disableSelfHarmShortCircuit": False,
@@ -276,6 +278,7 @@ class GrokChatService:
         stream: bool = None,
         file_attachments: List[str] = None,
         image_attachments: List[str] = None,
+        raw_payload: Dict[str, Any] = None,
     ):
         """
         发送聊天请求
@@ -296,9 +299,16 @@ class GrokChatService:
             stream = get_config("grok.stream", True)
 
         headers = ChatRequestBuilder.build_headers(token)
-        payload = ChatRequestBuilder.build_payload(
-            message, model, mode, file_attachments, image_attachments
-        )
+        if raw_payload is not None:
+            payload = raw_payload
+        else:
+            payload = ChatRequestBuilder.build_payload(
+                message,
+                model,
+                mode,
+                file_attachments,
+                image_attachments,
+            )
         proxies = {"http": self.proxy, "https": self.proxy} if self.proxy else None
         timeout = get_config("grok.timeout", TIMEOUT)
 
@@ -308,10 +318,13 @@ class GrokChatService:
                 return e.details.get("status")
             return None
 
+        logger.debug(f"Payload: {payload}")
+        
         # 建立连接函数
         async def establish_connection():
             """建立连接并返回 response 对象"""
-            session = AsyncSession(impersonate=BROWSER)
+            browser = get_config("grok.browser", DEFAULT_BROWSER)
+            session = AsyncSession(impersonate=browser)
             try:
                 response = await session.post(
                     CHAT_API,
@@ -335,15 +348,10 @@ class GrokChatService:
                             "token": token[:10] + "...",
                         },
                     )
-                    resp_headers = {}
-                    try:
-                        resp_headers = dict(response.headers)
-                    except Exception:
-                        resp_headers = {}
                     body_for_log = content if content else "<empty>"
                     logger.debug(
                         "Grok API error response "
-                        f"(status={response.status_code}, headers={resp_headers}): {body_for_log}"
+                        f"(status={response.status_code}): {body_for_log}"
                     )
                     # 关闭 session 并抛出异常
                     try:
@@ -355,7 +363,6 @@ class GrokChatService:
                         details={
                             "status": response.status_code,
                             "body": content,
-                            "headers": resp_headers,
                         },
                     )
 

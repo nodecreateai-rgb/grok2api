@@ -34,10 +34,11 @@ UPLOAD_API = "https://grok.com/rest/app-chat/upload-file"
 LIST_API = "https://grok.com/rest/assets"
 DELETE_API = "https://grok.com/rest/assets-metadata"
 DOWNLOAD_API = "https://assets.grok.com"
-LOCK_DIR = Path(__file__).parent.parent.parent.parent / "data" / ".locks"
+LOCK_DIR = Path(__file__).parent.parent.parent.parent.parent / "data" / ".locks"
 
 TIMEOUT = 120
-BROWSER = "chrome136"
+DEFAULT_BROWSER = "chrome136"
+DEFAULT_USER_AGENT = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36"
 DEFAULT_MIME = "application/octet-stream"
 
 # 并发控制
@@ -179,6 +180,7 @@ class BaseService:
 
     def _headers(self, token: str, referer: str = "https://grok.com/") -> dict:
         """构建请求头"""
+        user_agent = get_config("grok.user_agent", DEFAULT_USER_AGENT)
         headers = {
             "Accept": "*/*",
             "Accept-Encoding": "gzip, deflate, br, zstd",
@@ -199,7 +201,7 @@ class BaseService:
             "Sec-Fetch-Dest": "empty",
             "Sec-Fetch-Mode": "cors",
             "Sec-Fetch-Site": "same-origin",
-            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36",
+            "User-Agent": user_agent,
         }
 
         apply_statsig(headers)
@@ -354,7 +356,7 @@ class UploadService(BaseService):
                     UPLOAD_API,
                     headers=headers,
                     json=payload,
-                    impersonate=BROWSER,
+                    impersonate=get_config("grok.browser", DEFAULT_BROWSER),
                     timeout=self.timeout,
                     proxies=self._proxies(),
                 )
@@ -448,7 +450,7 @@ class ListService(BaseService):
                     LIST_API,
                     headers=headers,
                     params=params,
-                    impersonate=BROWSER,
+                    impersonate=get_config("grok.browser", DEFAULT_BROWSER),
                     timeout=self.timeout,
                     proxies=self._proxies(),
                 )
@@ -527,7 +529,7 @@ class DeleteService(BaseService):
                 response = await session.delete(
                     url,
                     headers=headers,
-                    impersonate=BROWSER,
+                    impersonate=get_config("grok.browser", DEFAULT_BROWSER),
                     timeout=self.timeout,
                     proxies=self._proxies(),
                 )
@@ -607,7 +609,7 @@ class DownloadService(BaseService):
     def __init__(self, proxy: str = None):
         super().__init__(proxy)
         # 创建缓存目录
-        self.base_dir = Path(__file__).parent.parent.parent.parent / "data" / "tmp"
+        self.base_dir = Path(__file__).parent.parent.parent.parent.parent / "data" / "tmp"
         self.image_dir = self.base_dir / "image"
         self.video_dir = self.base_dir / "video"
         self.image_dir.mkdir(parents=True, exist_ok=True)
@@ -663,7 +665,7 @@ class DownloadService(BaseService):
                         proxies=self._proxies(),
                         timeout=self.timeout,
                         allow_redirects=True,
-                        impersonate=BROWSER,
+                        impersonate=get_config("grok.browser", DEFAULT_BROWSER),
                         stream=True,
                     )
 
