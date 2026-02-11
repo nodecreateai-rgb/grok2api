@@ -529,7 +529,7 @@ class SQLStorage(BaseStorage):
                 # Tokens 表 (通用 SQL)
                 await conn.execute(
                     text("""
-                    CREATE TABLE IF NOT EXISTS tokens (
+                    CREATE TABLE IF NOT EXISTS grok_tokens (
                         token VARCHAR(512) PRIMARY KEY,
                         pool_name VARCHAR(64) NOT NULL,
                         data TEXT,
@@ -541,7 +541,7 @@ class SQLStorage(BaseStorage):
                 # 配置表
                 await conn.execute(
                     text("""
-                    CREATE TABLE IF NOT EXISTS app_config (
+                    CREATE TABLE IF NOT EXISTS grok_app_config (
                         section VARCHAR(64) NOT NULL,
                         key_name VARCHAR(64) NOT NULL,
                         value TEXT,
@@ -562,25 +562,109 @@ class SQLStorage(BaseStorage):
             # 索引（尽量避免重复创建导致事务失败）
             if self.dialect in ("postgres", "postgresql", "pgsql"):
                 await run_ddl_best_effort(
-                    "CREATE INDEX IF NOT EXISTS idx_tokens_pool ON tokens (pool_name)"
+                    "CREATE INDEX IF NOT EXISTS idx_grok_tokens_pool ON grok_tokens (pool_name)"
                 )
             else:
                 await run_ddl_best_effort(
-                    "CREATE INDEX idx_tokens_pool ON tokens (pool_name)"
+                    "CREATE INDEX idx_grok_tokens_pool ON grok_tokens (pool_name)"
                 )
 
             # 尝试兼容旧表结构（最佳努力）
             if self.dialect in ("mysql", "mariadb"):
                 await run_ddl_best_effort(
-                    "ALTER TABLE tokens MODIFY token VARCHAR(512)"
+                    "ALTER TABLE grok_tokens ADD COLUMN pool_name VARCHAR(64) NOT NULL DEFAULT 'default'"
                 )
-                await run_ddl_best_effort("ALTER TABLE tokens MODIFY data TEXT")
+                await run_ddl_best_effort(
+                    "ALTER TABLE grok_tokens ADD COLUMN updated_at BIGINT"
+                )
+                await run_ddl_best_effort(
+                    "ALTER TABLE grok_tokens ADD COLUMN data TEXT"
+                )
+                await run_ddl_best_effort(
+                    "ALTER TABLE grok_tokens MODIFY token VARCHAR(512)"
+                )
+                await run_ddl_best_effort(
+                    "ALTER TABLE grok_tokens MODIFY data TEXT"
+                )
             elif self.dialect in ("postgres", "postgresql", "pgsql"):
                 await run_ddl_best_effort(
-                    "ALTER TABLE tokens ALTER COLUMN token TYPE VARCHAR(512)"
+                    "ALTER TABLE grok_tokens ADD COLUMN IF NOT EXISTS pool_name VARCHAR(64)"
                 )
                 await run_ddl_best_effort(
-                    "ALTER TABLE tokens ALTER COLUMN data TYPE TEXT"
+                    "UPDATE grok_tokens SET pool_name = 'default' WHERE pool_name IS NULL"
+                )
+                await run_ddl_best_effort(
+                    "ALTER TABLE grok_tokens ALTER COLUMN pool_name SET NOT NULL"
+                )
+                await run_ddl_best_effort(
+                    "ALTER TABLE grok_tokens ADD COLUMN IF NOT EXISTS updated_at BIGINT"
+                )
+                await run_ddl_best_effort(
+                    "ALTER TABLE grok_tokens ADD COLUMN IF NOT EXISTS data TEXT"
+                )
+                await run_ddl_best_effort(
+                    "ALTER TABLE grok_tokens ALTER COLUMN token TYPE VARCHAR(512)"
+                )
+                await run_ddl_best_effort(
+                    "ALTER TABLE grok_tokens ALTER COLUMN data TYPE TEXT"
+                )
+
+            # 从历史通用表迁移到 grok 专属表（最佳努力）
+            if self.dialect in ("postgres", "postgresql", "pgsql"):
+                await run_ddl_best_effort(
+                    """
+                    INSERT INTO grok_app_config (section, key_name, value)
+                    SELECT section, key_name, value FROM app_config
+                    ON CONFLICT (section, key_name) DO NOTHING
+                    """
+                )
+
+                await run_ddl_best_effort(
+                    """
+                    INSERT INTO grok_tokens (token, pool_name, data, updated_at)
+                    SELECT token, pool_name, data, updated_at FROM tokens
+                    ON CONFLICT (token) DO NOTHING
+                    """
+                )
+                await run_ddl_best_effort(
+                    """
+                    INSERT INTO grok_tokens (token, pool_name, data, updated_at)
+                    SELECT token, 'default', data, updated_at FROM tokens
+                    ON CONFLICT (token) DO NOTHING
+                    """
+                )
+                await run_ddl_best_effort(
+                    """
+                    INSERT INTO grok_tokens (token, pool_name, data, updated_at)
+                    SELECT token, 'default', data, 0 FROM tokens
+                    ON CONFLICT (token) DO NOTHING
+                    """
+                )
+            elif self.dialect in ("mysql", "mariadb"):
+                await run_ddl_best_effort(
+                    """
+                    INSERT IGNORE INTO grok_app_config (section, key_name, value)
+                    SELECT section, key_name, value FROM app_config
+                    """
+                )
+
+                await run_ddl_best_effort(
+                    """
+                    INSERT IGNORE INTO grok_tokens (token, pool_name, data, updated_at)
+                    SELECT token, pool_name, data, updated_at FROM tokens
+                    """
+                )
+                await run_ddl_best_effort(
+                    """
+                    INSERT IGNORE INTO grok_tokens (token, pool_name, data, updated_at)
+                    SELECT token, 'default', data, updated_at FROM tokens
+                    """
+                )
+                await run_ddl_best_effort(
+                    """
+                    INSERT IGNORE INTO grok_tokens (token, pool_name, data, updated_at)
+                    SELECT token, 'default', data, 0 FROM tokens
+                    """
                 )
 
             self._initialized = True
@@ -648,7 +732,7 @@ class SQLStorage(BaseStorage):
         try:
             async with self.async_session() as session:
                 res = await session.execute(
-                    text("SELECT section, key_name, value FROM app_config")
+                    text("SELECT section, key_name, value FROM grok_app_config")
                 )
                 rows = res.fetchall()
                 if not rows:
@@ -683,13 +767,13 @@ class SQLStorage(BaseStorage):
                         # Upsert 逻辑 (简单实现: Delete + Insert)
                         await session.execute(
                             text(
-                                "DELETE FROM app_config WHERE section=:s AND key_name=:k"
+                                "DELETE FROM grok_app_config WHERE section=:s AND key_name=:k"
                             ),
                             {"s": section, "k": key},
                         )
                         await session.execute(
                             text(
-                                "INSERT INTO app_config (section, key_name, value) VALUES (:s, :k, :v)"
+                                "INSERT INTO grok_app_config (section, key_name, value) VALUES (:s, :k, :v)"
                             ),
                             {"s": section, "k": key, "v": val_str},
                         )
@@ -704,7 +788,9 @@ class SQLStorage(BaseStorage):
 
         try:
             async with self.async_session() as session:
-                res = await session.execute(text("SELECT pool_name, data FROM tokens"))
+                res = await session.execute(
+                    text("SELECT pool_name, data FROM grok_tokens")
+                )
                 rows = res.fetchall()
                 if not rows:
                     return None
@@ -733,7 +819,7 @@ class SQLStorage(BaseStorage):
 
         try:
             async with self.async_session() as session:
-                await session.execute(text("DELETE FROM tokens"))
+                await session.execute(text("DELETE FROM grok_tokens"))
 
                 params = []
                 for pool_name, tokens in data.items():
@@ -751,7 +837,7 @@ class SQLStorage(BaseStorage):
                     # 批量插入
                     await session.execute(
                         text(
-                            "INSERT INTO tokens (token, pool_name, data, updated_at) VALUES (:token, :pool_name, :data, :updated_at)"
+                            "INSERT INTO grok_tokens (token, pool_name, data, updated_at) VALUES (:token, :pool_name, :data, :updated_at)"
                         ),
                         params,
                     )
