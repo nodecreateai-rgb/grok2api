@@ -523,9 +523,9 @@ class SQLStorage(BaseStorage):
         if self._initialized:
             return
         try:
-            async with self.engine.begin() as conn:
-                from sqlalchemy import text
+            from sqlalchemy import text
 
+            async with self.engine.begin() as conn:
                 # Tokens 表 (通用 SQL)
                 await conn.execute(
                     text("""
@@ -550,32 +550,38 @@ class SQLStorage(BaseStorage):
                 """)
                 )
 
-                # 索引
+            # 注意：PostgreSQL 下任意 DDL 失败会使当前事务进入 aborted 状态，
+            # 所以把“可能失败”的兼容语句拆到独立事务里，避免影响建表提交。
+            async def run_ddl_best_effort(sql: str):
                 try:
-                    await conn.execute(
-                        text("CREATE INDEX idx_tokens_pool ON tokens (pool_name)")
-                    )
+                    async with self.engine.begin() as conn:
+                        await conn.execute(text(sql))
                 except Exception:
                     pass
 
-                # 尝试兼容旧表结构
-                try:
-                    if self.dialect in ("mysql", "mariadb"):
-                        await conn.execute(
-                            text("ALTER TABLE tokens MODIFY token VARCHAR(512)")
-                        )
-                        await conn.execute(text("ALTER TABLE tokens MODIFY data TEXT"))
-                    elif self.dialect in ("postgres", "postgresql", "pgsql"):
-                        await conn.execute(
-                            text(
-                                "ALTER TABLE tokens ALTER COLUMN token TYPE VARCHAR(512)"
-                            )
-                        )
-                        await conn.execute(
-                            text("ALTER TABLE tokens ALTER COLUMN data TYPE TEXT")
-                        )
-                except Exception:
-                    pass
+            # 索引（尽量避免重复创建导致事务失败）
+            if self.dialect in ("postgres", "postgresql", "pgsql"):
+                await run_ddl_best_effort(
+                    "CREATE INDEX IF NOT EXISTS idx_tokens_pool ON tokens (pool_name)"
+                )
+            else:
+                await run_ddl_best_effort(
+                    "CREATE INDEX idx_tokens_pool ON tokens (pool_name)"
+                )
+
+            # 尝试兼容旧表结构（最佳努力）
+            if self.dialect in ("mysql", "mariadb"):
+                await run_ddl_best_effort(
+                    "ALTER TABLE tokens MODIFY token VARCHAR(512)"
+                )
+                await run_ddl_best_effort("ALTER TABLE tokens MODIFY data TEXT")
+            elif self.dialect in ("postgres", "postgresql", "pgsql"):
+                await run_ddl_best_effort(
+                    "ALTER TABLE tokens ALTER COLUMN token TYPE VARCHAR(512)"
+                )
+                await run_ddl_best_effort(
+                    "ALTER TABLE tokens ALTER COLUMN data TYPE TEXT"
+                )
 
             self._initialized = True
         except Exception as e:
